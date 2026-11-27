@@ -23,7 +23,13 @@
             <div class="task" data-id="{{ task.id }}">
                 <span class="status {{ task.status }}">{{ task.status }}</span>
                 <div class="task-info">
-                    <span class="title">{{ task.title }}</span>
+                    <a href="/task/{{ task.id }}" class="title">{{ task.title }}</a>
+                    {% if task.description %}
+                    <span class="description-preview">{{ task.description[:80] }}{% if task.description|length > 80 %}...{% endif %}</span>
+                    {% endif %}
+                    {% if task.subtasks %}
+                    <span class="subtask-count">{{ task.subtasks|selectattr('status', 'equalto', 'done')|list|length }}/{{ task.subtasks|length }} subtasks done</span>
+                    {% endif %}
                     <div class="task-dates">
                         <span>Created: {{ task.created_at }}</span>
                         <span>Modified: {{ task.modified_at }}</span>
@@ -80,7 +86,9 @@
                 <div class="task" data-id="${t.id}">
                     <span class="status ${t.status}">${t.status}</span>
                     <div class="task-info">
-                        <span class="title">${escapeHtml(t.title)}</span>
+                        <a href="/task/${t.id}" class="title">${escapeHtml(t.title)}</a>
+                        ${t.description ? `<span class="description-preview">${escapeHtml(t.description.length > 80 ? t.description.slice(0, 80) + "..." : t.description)}</span>` : ""}
+                        ${t.subtasks && t.subtasks.length > 0 ? `<span class="subtask-count">${t.subtasks.filter(s => s.status === "done").length}/${t.subtasks.length} subtasks done</span>` : ""}
                         <div class="task-dates">
                             <span>Created: ${formatDate(t.created_at)}</span>
                             <span>Modified: ${formatDate(t.modified_at)}</span>
