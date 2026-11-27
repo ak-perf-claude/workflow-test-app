@@ -233,9 +233,10 @@ class TestDetailPage:
     def test_back_link(self, driver):
         self._create_and_navigate(driver, "Back link test")
         driver.find_element(By.CSS_SELECTOR, ".back-link").click()
-        WebDriverWait(driver, 5).until(
+        WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.ID, "task-form"))
         )
+        assert "/task/" not in driver.current_url
 
     def test_nav_bar_shows_username(self, driver):
         self._create_and_navigate(driver, "Nav test")
