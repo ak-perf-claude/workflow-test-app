@@ -1,3 +1,5 @@
+import os
+import tempfile
 import threading
 import time
 
@@ -9,16 +11,21 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 
-import app as app_module
-from app import app
+from app import app, init_db
 
 BASE_URL = "http://127.0.0.1:5111"
+TEST_USER = "uitester"
+TEST_PASS = "testpass"
 
 
 @pytest.fixture(scope="module")
 def server():
-    app_module.tasks = []
+    db_fd, db_path = tempfile.mkstemp(suffix=".db")
     app.config["TESTING"] = True
+    app.config["DATABASE"] = db_path
+    app.config["SECRET_KEY"] = "ui-test-secret"
+    with app.app_context():
+        init_db()
     server = threading.Thread(
         target=lambda: app.run(port=5111, use_reloader=False),
         daemon=True,
@@ -26,7 +33,8 @@ def server():
     server.start()
     time.sleep(1)
     yield
-    app_module.tasks = []
+    os.close(db_fd)
+    os.unlink(db_path)
 
 
 @pytest.fixture
@@ -39,7 +47,6 @@ def driver(server):
     d.implicitly_wait(5)
     yield d
     d.quit()
-    app_module.tasks = []
 
 
 def wait_for(driver, by, value, timeout=5):
@@ -48,13 +55,75 @@ def wait_for(driver, by, value, timeout=5):
     )
 
 
+def signup_ui(driver, username=TEST_USER, password=TEST_PASS):
+    driver.get(f"{BASE_URL}/signup")
+    driver.find_element(By.ID, "username").send_keys(username)
+    driver.find_element(By.ID, "password").send_keys(password)
+    driver.find_element(By.ID, "confirm").send_keys(password)
+    driver.find_element(By.CSS_SELECTOR, ".auth-form button").click()
+    wait_for(driver, By.CSS_SELECTOR, ".auth-form")
+
+
+def login_ui(driver, username=TEST_USER, password=TEST_PASS):
+    driver.get(f"{BASE_URL}/login")
+    driver.find_element(By.ID, "username").send_keys(username)
+    driver.find_element(By.ID, "password").send_keys(password)
+    driver.find_element(By.CSS_SELECTOR, ".auth-form button").click()
+    wait_for(driver, By.ID, "task-form")
+
+
+import uuid
+
+
+def fresh_login(driver):
+    username = f"ui_{uuid.uuid4().hex[:8]}"
+    signup_ui(driver, username, TEST_PASS)
+    login_ui(driver, username, TEST_PASS)
+
+
+class TestAuthUI:
+    def test_redirect_to_login(self, driver):
+        driver.get(BASE_URL)
+        WebDriverWait(driver, 5).until(EC.url_contains("/login"))
+        assert "/login" in driver.current_url
+
+    def test_signup_page_loads(self, driver):
+        driver.get(f"{BASE_URL}/signup")
+        assert "Sign Up" in driver.title
+
+    def test_login_page_loads(self, driver):
+        driver.get(f"{BASE_URL}/login")
+        assert "Log In" in driver.title
+
+    def test_signup_and_login_flow(self, driver):
+        fresh_login(driver)
+        assert "Workflow Test App" in driver.title
+        nav = driver.find_element(By.CSS_SELECTOR, ".nav-bar")
+        assert "Logged in as" in nav.text
+
+    def test_logout(self, driver):
+        fresh_login(driver)
+        driver.find_element(By.CSS_SELECTOR, ".nav-bar a").click()
+        WebDriverWait(driver, 5).until(EC.url_contains("/login"))
+        assert "/login" in driver.current_url
+
+    def test_login_wrong_password(self, driver):
+        driver.get(f"{BASE_URL}/login")
+        driver.find_element(By.ID, "username").send_keys("nonexistent")
+        driver.find_element(By.ID, "password").send_keys("wrong")
+        driver.find_element(By.CSS_SELECTOR, ".auth-form button").click()
+        wait_for(driver, By.CSS_SELECTOR, ".message.error")
+        error = driver.find_element(By.CSS_SELECTOR, ".message.error")
+        assert "Invalid" in error.text
+
+
 class TestHomePage:
     def test_page_loads(self, driver):
-        driver.get(BASE_URL)
+        fresh_login(driver)
         assert "Workflow Test App" in driver.title
 
     def test_create_task(self, driver):
-        driver.get(BASE_URL)
+        fresh_login(driver)
         inp = driver.find_element(By.ID, "task-input")
         inp.send_keys("Selenium task")
         driver.find_element(By.CSS_SELECTOR, "#task-form button").click()
@@ -63,7 +132,7 @@ class TestHomePage:
         assert any("Selenium task" in t.text for t in tasks)
 
     def test_summary_bar_updates(self, driver):
-        driver.get(BASE_URL)
+        fresh_login(driver)
         inp = driver.find_element(By.ID, "task-input")
         inp.send_keys("Summary test")
         driver.find_element(By.CSS_SELECTOR, "#task-form button").click()
@@ -73,7 +142,7 @@ class TestHomePage:
         assert "Pending:" in summary
 
     def test_toggle_task_status(self, driver):
-        driver.get(BASE_URL)
+        fresh_login(driver)
         inp = driver.find_element(By.ID, "task-input")
         inp.send_keys("Toggle test")
         driver.find_element(By.CSS_SELECTOR, "#task-form button").click()
@@ -85,7 +154,7 @@ class TestHomePage:
         assert "done" in status.text.lower()
 
     def test_delete_task(self, driver):
-        driver.get(BASE_URL)
+        fresh_login(driver)
         inp = driver.find_element(By.ID, "task-input")
         inp.send_keys("Delete me")
         driver.find_element(By.CSS_SELECTOR, "#task-form button").click()
@@ -97,7 +166,7 @@ class TestHomePage:
         assert not any("Delete me" in t.text for t in tasks)
 
     def test_task_title_links_to_detail(self, driver):
-        driver.get(BASE_URL)
+        fresh_login(driver)
         inp = driver.find_element(By.ID, "task-input")
         inp.send_keys("Link test")
         driver.find_element(By.CSS_SELECTOR, "#task-form button").click()
@@ -110,7 +179,7 @@ class TestHomePage:
 
 class TestDetailPage:
     def _create_and_navigate(self, driver, title="Detail test"):
-        driver.get(BASE_URL)
+        fresh_login(driver)
         inp = driver.find_element(By.ID, "task-input")
         inp.send_keys(title)
         driver.find_element(By.CSS_SELECTOR, "#task-form button").click()
@@ -156,9 +225,10 @@ class TestDetailPage:
         driver.find_element(By.CSS_SELECTOR, ".btn-delete").click()
         WebDriverWait(driver, 3).until(EC.alert_is_present())
         driver.switch_to.alert.accept()
-        WebDriverWait(driver, 5).until(EC.url_contains(BASE_URL))
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "task-form"))
+        )
         time.sleep(0.5)
-        assert driver.current_url.rstrip("/") == BASE_URL
 
     def test_back_link(self, driver):
         self._create_and_navigate(driver, "Back link test")
@@ -166,12 +236,16 @@ class TestDetailPage:
         WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.ID, "task-form"))
         )
-        assert "task" not in driver.current_url.split("/")[-1]
+
+    def test_nav_bar_shows_username(self, driver):
+        self._create_and_navigate(driver, "Nav test")
+        nav = driver.find_element(By.CSS_SELECTOR, ".nav-bar")
+        assert "Logged in as" in nav.text
 
 
 class TestSubtasksUI:
     def _create_and_navigate(self, driver, title="Subtask parent"):
-        driver.get(BASE_URL)
+        fresh_login(driver)
         inp = driver.find_element(By.ID, "task-input")
         inp.send_keys(title)
         driver.find_element(By.CSS_SELECTOR, "#task-form button").click()
