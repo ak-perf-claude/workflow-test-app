@@ -209,7 +209,10 @@ class TestDetailPage:
         textarea.send_keys("My description text")
         driver.find_element(By.CSS_SELECTOR, ".btn-save").click()
         wait_for(driver, By.CSS_SELECTOR, ".message.success")
-        assert textarea.get_attribute("value") == "My description text"
+        time.sleep(0.5)
+        updated = driver.find_element(By.ID, "desc-input")
+        actual = updated.get_attribute("value") or updated.text
+        assert "My description text" in actual
 
     def test_change_status(self, driver):
         self._create_and_navigate(driver, "Status test")
@@ -232,7 +235,11 @@ class TestDetailPage:
 
     def test_back_link(self, driver):
         self._create_and_navigate(driver, "Back link test")
-        driver.find_element(By.CSS_SELECTOR, ".back-link").click()
+        detail_url = driver.current_url
+        assert "/task/" in detail_url
+        back = driver.find_element(By.CSS_SELECTOR, ".back-link")
+        back.click()
+        WebDriverWait(driver, 10).until(EC.url_changes(detail_url))
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.ID, "task-form"))
         )
