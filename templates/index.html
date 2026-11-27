@@ -8,6 +8,11 @@
 </head>
 <body>
     <div class="container">
+        <div class="nav-bar">
+            <span>Logged in as <strong>{{ session['username'] }}</strong></span>
+            <a href="/logout">Logout</a>
+        </div>
+
         <h1>Workflow Test App</h1>
         <p class="subtitle">A simple task tracker for testing Claude workflows</p>
 

@@ -1,23 +1,117 @@
+import os
+import tempfile
+
 import pytest
-import app as app_module
-from app import app
+from app import app, init_db
 
 
 @pytest.fixture
 def client():
+    db_fd, db_path = tempfile.mkstemp(suffix=".db")
     app.config["TESTING"] = True
+    app.config["DATABASE"] = db_path
+    app.config["SECRET_KEY"] = "test-secret"
+    with app.app_context():
+        init_db()
     with app.test_client() as client:
-        app_module.tasks = []
         yield client
-        app_module.tasks = []
+    os.close(db_fd)
+    os.unlink(db_path)
+
+
+def register_user(client, username="testuser", password="testpass"):
+    return client.post("/signup", data={
+        "username": username,
+        "password": password,
+        "confirm": password,
+    }, follow_redirects=True)
+
+
+def login_user(client, username="testuser", password="testpass"):
+    return client.post("/login", data={
+        "username": username,
+        "password": password,
+    }, follow_redirects=True)
 
 
 def create_task(client, title="Test task"):
+    register_user(client)
+    login_user(client)
     return client.post("/api/tasks", json={"title": title})
+
+
+class TestAuth:
+    def test_signup_page_loads(self, client):
+        res = client.get("/signup")
+        assert res.status_code == 200
+        assert b"Sign Up" in res.data
+
+    def test_login_page_loads(self, client):
+        res = client.get("/login")
+        assert res.status_code == 200
+        assert b"Log In" in res.data
+
+    def test_signup_and_login(self, client):
+        register_user(client)
+        res = login_user(client)
+        assert res.status_code == 200
+        assert b"Workflow Test App" in res.data
+
+    def test_signup_duplicate_username(self, client):
+        register_user(client)
+        res = client.post("/signup", data={
+            "username": "testuser",
+            "password": "testpass",
+            "confirm": "testpass",
+        })
+        assert b"already taken" in res.data
+
+    def test_signup_password_mismatch(self, client):
+        res = client.post("/signup", data={
+            "username": "testuser",
+            "password": "testpass",
+            "confirm": "different",
+        })
+        assert b"do not match" in res.data
+
+    def test_signup_short_password(self, client):
+        res = client.post("/signup", data={
+            "username": "testuser",
+            "password": "ab",
+            "confirm": "ab",
+        })
+        assert b"at least 4" in res.data
+
+    def test_login_wrong_password(self, client):
+        register_user(client)
+        res = client.post("/login", data={
+            "username": "testuser",
+            "password": "wrongpass",
+        })
+        assert b"Invalid" in res.data
+
+    def test_login_nonexistent_user(self, client):
+        res = client.post("/login", data={
+            "username": "noone",
+            "password": "testpass",
+        })
+        assert b"Invalid" in res.data
+
+    def test_logout_redirects_to_login(self, client):
+        register_user(client)
+        login_user(client)
+        res = client.get("/logout", follow_redirects=True)
+        assert b"Log In" in res.data
+
+    def test_protected_route_redirects(self, client):
+        res = client.get("/", follow_redirects=True)
+        assert b"Log In" in res.data
 
 
 class TestIndex:
     def test_index_returns_html(self, client):
+        register_user(client)
+        login_user(client)
         res = client.get("/")
         assert res.status_code == 200
         assert b"Workflow Test App" in res.data
@@ -25,18 +119,32 @@ class TestIndex:
 
 class TestGetTasks:
     def test_empty_list(self, client):
+        register_user(client)
+        login_user(client)
         res = client.get("/api/tasks")
         assert res.status_code == 200
         assert res.get_json() == []
 
     def test_list_after_create(self, client):
-        create_task(client, "Task A")
-        create_task(client, "Task B")
+        register_user(client)
+        login_user(client)
+        client.post("/api/tasks", json={"title": "Task A"})
+        client.post("/api/tasks", json={"title": "Task B"})
         res = client.get("/api/tasks")
         data = res.get_json()
         assert len(data) == 2
         assert data[0]["title"] == "Task A"
         assert data[1]["title"] == "Task B"
+
+    def test_tasks_are_per_user(self, client):
+        register_user(client, "user1", "pass1")
+        login_user(client, "user1", "pass1")
+        client.post("/api/tasks", json={"title": "User1 task"})
+        client.get("/logout")
+        register_user(client, "user2", "pass2")
+        login_user(client, "user2", "pass2")
+        res = client.get("/api/tasks")
+        assert res.get_json() == []
 
 
 class TestGetTask:
@@ -52,6 +160,8 @@ class TestGetTask:
         assert "modified_at" in data
 
     def test_get_nonexistent_returns_404(self, client):
+        register_user(client)
+        login_user(client)
         res = client.get("/api/tasks/999")
         assert res.status_code == 404
 
@@ -65,6 +175,8 @@ class TestDetailPage:
         assert b"Task #1" in res.data
 
     def test_detail_page_nonexistent_returns_404(self, client):
+        register_user(client)
+        login_user(client)
         res = client.get("/task/999")
         assert res.status_code == 404
 
@@ -87,10 +199,14 @@ class TestCreateTask:
         assert data["created_at"] == data["modified_at"]
 
     def test_create_with_custom_status(self, client):
+        register_user(client)
+        login_user(client)
         res = client.post("/api/tasks", json={"title": "Done task", "status": "done"})
         assert res.get_json()["status"] == "done"
 
     def test_create_with_description(self, client):
+        register_user(client)
+        login_user(client)
         res = client.post("/api/tasks", json={"title": "Task", "description": "Some details"})
         assert res.get_json()["description"] == "Some details"
 
@@ -99,10 +215,14 @@ class TestCreateTask:
         assert res.get_json()["description"] == ""
 
     def test_create_missing_title_returns_400(self, client):
+        register_user(client)
+        login_user(client)
         res = client.post("/api/tasks", json={})
         assert res.status_code == 400
 
     def test_create_no_body_returns_400(self, client):
+        register_user(client)
+        login_user(client)
         res = client.post("/api/tasks", content_type="application/json")
         assert res.status_code == 400
 
@@ -131,6 +251,8 @@ class TestUpdateTask:
         assert res.get_json()["description"] == "Updated desc"
 
     def test_update_nonexistent_returns_404(self, client):
+        register_user(client)
+        login_user(client)
         res = client.patch("/api/tasks/999", json={"title": "Nope"})
         assert res.status_code == 404
 
@@ -148,6 +270,8 @@ class TestDeleteTask:
         assert res.get_json() == []
 
     def test_delete_nonexistent_returns_404(self, client):
+        register_user(client)
+        login_user(client)
         res = client.delete("/api/tasks/999")
         assert res.status_code == 404
 
@@ -168,6 +292,8 @@ class TestSubtasks:
         assert res.status_code == 400
 
     def test_create_subtask_nonexistent_task(self, client):
+        register_user(client)
+        login_user(client)
         res = client.post("/api/tasks/999/subtasks", json={"title": "Sub"})
         assert res.status_code == 404
 

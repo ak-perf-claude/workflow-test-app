@@ -8,6 +8,11 @@
 </head>
 <body>
     <div class="container">
+        <div class="nav-bar">
+            <span>Logged in as <strong>{{ session['username'] }}</strong></span>
+            <a href="/logout">Logout</a>
+        </div>
+
         <a href="/" class="back-link">&larr; Back to tasks</a>
 
         <div id="message"></div>
