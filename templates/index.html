@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Test App</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Workflow Test App</h1>
+        <p class="subtitle">A simple task tracker for testing Claude workflows</p>
+
+        <form id="task-form">
+            <input type="text" id="task-input" placeholder="New task..." required>
+            <button type="submit">Add</button>
+        </form>
+
+        <div id="task-list">
+            {% for task in tasks %}
+            <div class="task" data-id="{{ task.id }}">
+                <span class="status {{ task.status }}">{{ task.status }}</span>
+                <span class="title">{{ task.title }}</span>
+                <div class="actions">
+                    <button onclick="toggleTask({{ task.id }})">Toggle</button>
+                    <button onclick="deleteTask({{ task.id }})">Delete</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById("task-form");
+        const input = document.getElementById("task-input");
+        const list = document.getElementById("task-list");
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const title = input.value.trim();
+            if (!title) return;
+
+            const res = await fetch("/api/tasks", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title }),
+            });
+            if (res.ok) {
+                input.value = "";
+                loadTasks();
+            }
+        });
+
+        async function loadTasks() {
+            const res = await fetch("/api/tasks");
+            const tasks = await res.json();
+            list.innerHTML = tasks.map(t => `
+                <div class="task" data-id="${t.id}">
+                    <span class="status ${t.status}">${t.status}</span>
+                    <span class="title">${escapeHtml(t.title)}</span>
+                    <div class="actions">
+                        <button onclick="toggleTask(${t.id})">Toggle</button>
+                        <button onclick="deleteTask(${t.id})">Delete</button>
+                    </div>
+                </div>
+            `).join("");
+        }
+
+        async function toggleTask(id) {
+            const res = await fetch(`/api/tasks/${id}`);
+            const tasks = await fetch("/api/tasks").then(r => r.json());
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            const newStatus = task.status === "pending" ? "done" : "pending";
+            await fetch(`/api/tasks/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: newStatus }),
+            });
+            loadTasks();
+        }
+
+        async function deleteTask(id) {
+            await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+            loadTasks();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
