@@ -16,11 +16,19 @@
             <button type="submit">Add</button>
         </form>
 
+        <div id="task-summary" class="task-summary"></div>
+
         <div id="task-list">
             {% for task in tasks %}
             <div class="task" data-id="{{ task.id }}">
                 <span class="status {{ task.status }}">{{ task.status }}</span>
-                <span class="title">{{ task.title }}</span>
+                <div class="task-info">
+                    <span class="title">{{ task.title }}</span>
+                    <div class="task-dates">
+                        <span>Created: {{ task.created_at }}</span>
+                        <span>Modified: {{ task.modified_at }}</span>
+                    </div>
+                </div>
                 <div class="actions">
                     <button onclick="toggleTask({{ task.id }})">Toggle</button>
                     <button onclick="deleteTask({{ task.id }})">Delete</button>
@@ -54,10 +62,30 @@
         async function loadTasks() {
             const res = await fetch("/api/tasks");
             const tasks = await res.json();
+            const total = tasks.length;
+            const done = tasks.filter(t => t.status === "done").length;
+            const pending = total - done;
+            const summary = document.getElementById("task-summary");
+            if (total === 0) {
+                summary.innerHTML = "";
+            } else {
+                summary.innerHTML = `
+                    <span class="summary-item">Total: <strong>${total}</strong></span>
+                    <span class="summary-item pending">Pending: <strong>${pending}</strong></span>
+                    <span class="summary-item done">Done: <strong>${done}</strong></span>
+                `;
+            }
+
             list.innerHTML = tasks.map(t => `
                 <div class="task" data-id="${t.id}">
                     <span class="status ${t.status}">${t.status}</span>
-                    <span class="title">${escapeHtml(t.title)}</span>
+                    <div class="task-info">
+                        <span class="title">${escapeHtml(t.title)}</span>
+                        <div class="task-dates">
+                            <span>Created: ${formatDate(t.created_at)}</span>
+                            <span>Modified: ${formatDate(t.modified_at)}</span>
+                        </div>
+                    </div>
                     <div class="actions">
                         <button onclick="toggleTask(${t.id})">Toggle</button>
                         <button onclick="deleteTask(${t.id})">Delete</button>
@@ -83,6 +111,12 @@
         async function deleteTask(id) {
             await fetch(`/api/tasks/${id}`, { method: "DELETE" });
             loadTasks();
+        }
+
+        function formatDate(iso) {
+            if (!iso) return "—";
+            const d = new Date(iso);
+            return d.toLocaleString();
         }
 
         function escapeHtml(text) {

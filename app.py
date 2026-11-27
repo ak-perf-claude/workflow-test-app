@@ -1,8 +1,14 @@
+from datetime import datetime, timezone
+
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
 tasks = []
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 @app.route("/")
@@ -20,10 +26,13 @@ def add_task():
     data = request.get_json()
     if not data or "title" not in data:
         return jsonify({"error": "title is required"}), 400
+    ts = now_iso()
     task = {
         "id": len(tasks) + 1,
         "title": data["title"],
         "status": data.get("status", "pending"),
+        "created_at": ts,
+        "modified_at": ts,
     }
     tasks.append(task)
     return jsonify(task), 201
@@ -39,6 +48,7 @@ def update_task(task_id):
         task["title"] = data["title"]
     if "status" in data:
         task["status"] = data["status"]
+    task["modified_at"] = now_iso()
     return jsonify(task)
 
 
